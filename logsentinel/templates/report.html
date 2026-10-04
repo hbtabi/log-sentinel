@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>log-sentinel report</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3; --muted:#8b949e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:28px 22px 60px; }
+  h1 { margin:0; font-size:24px; } h2 { font-size:17px; margin:30px 0 10px; }
+  .sub { color:var(--muted); margin-top:4px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-top:20px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .card .n { font-size:26px; font-weight:700; } .card .l { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; margin-right:16px; color:var(--muted); font-size:12px; }
+  .legend i { width:10px; height:10px; border-radius:2px; display:inline-block; }
+  table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .pill { display:inline-block; padding:1px 9px; border-radius:20px; font-size:12px; font-weight:600; color:#0d1117; }
+  code, pre { font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace; font-size:12px; }
+  pre { background:#0b0f14; border:1px solid var(--border); border-radius:6px; padding:8px 10px; overflow-x:auto; margin:8px 0 0; color:#c9d1d9; }
+  details summary { cursor:pointer; color:#58a6ff; font-size:12px; margin-top:4px; }
+  .mitre { color:var(--muted); font-size:12px; }
+  .summary { white-space:pre-wrap; }
+  .empty { color:var(--muted); font-style:italic; }
+  footer { color:var(--muted); font-size:12px; margin-top:40px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🛡️ log-sentinel report</h1>
+  <div class="sub">
+    {{ r.events|length }} events from {{ r.sources|map('replace', '\\', '/')|join(', ') or 'stdin' }}
+    {% if r.time_range %}&middot; {{ r.time_range[0].strftime('%d %b %Y %H:%M') }} &rarr; {{ r.time_range[1].strftime('%d %b %Y %H:%M') }}{% endif %}
+    &middot; generated {{ r.generated_at.strftime('%d %b %Y %H:%M') }}
+  </div>
+
+  <div class="cards">
+    {% for sev, n in r.severity_counts.items() %}
+    <div class="card"><div class="n" style="color: {{ sev_color[sev] }}">{{ n }}</div><div class="l">{{ sev }} findings</div></div>
+    {% endfor %}
+    <div class="card"><div class="n">{{ r.anomalies|length }}</div><div class="l">ML anomalies</div></div>
+    <div class="card"><div class="n">{{ r.flagged_ips|length }}</div><div class="l">flagged IPs</div></div>
+  </div>
+
+  {% if r.summary_text %}
+  <h2>Summary</h2>
+  <div class="panel summary">{{ r.summary_text }}</div>
+  {% endif %}
+
+  <h2>Timeline</h2>
+  <div class="panel">
+    <div class="legend">{% for name, color, _ in series %}<span><i style="background: {{ color }}"></i>{{ name }}</span>{% endfor %}<span>● finding</span></div>
+    {{ timeline|safe }}
+  </div>
+
+  <h2>Findings ({{ r.findings|length }})</h2>
+  <div class="panel">
+  {% if r.findings %}
+  <table>
+    <tr><th>Severity</th><th>Finding</th><th>Source IP</th><th>When</th><th>Count</th></tr>
+    {% for f in r.findings %}
+    <tr>
+      <td><span class="pill" style="background: {{ sev_color[f.severity] }}">{{ f.severity }}</span></td>
+      <td><b>{{ f.title }}</b><br>{{ f.description }}<br><span class="mitre">MITRE ATT&amp;CK {{ f.mitre }}</span>
+        <details><summary>evidence</summary><pre>{{ f.evidence|join('\n') }}</pre></details></td>
+      <td><code>{{ f.ip }}</code></td>
+      <td>{{ f.first_seen.strftime('%d %b %H:%M:%S') }}{% if f.last_seen != f.first_seen %}<br><span class="mitre">to {{ f.last_seen.strftime('%H:%M:%S') }}</span>{% endif %}</td>
+      <td>{{ f.count }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">No rule-based findings.</div>{% endif %}
+  </div>
+
+  <h2>Behavioural anomalies (Isolation Forest)</h2>
+  <div class="panel">
+  {% if r.anomalies %}
+  <table>
+    <tr><th>Score</th><th>Source</th><th>IP</th><th>Window</th><th>Why it stands out</th></tr>
+    {% for a in r.anomalies %}
+    <tr>
+      <td>{{ '%.2f'|format(a.score) }}</td><td>{{ a.source }}</td><td><code>{{ a.ip }}</code></td>
+      <td>{{ a.window_start.strftime('%d %b %H:%M') }}</td>
+      <td>{{ a.reasons|join('; ') }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">No anomalies (or not enough data to learn a baseline).</div>{% endif %}
+  </div>
+
+  <h2>Top talkers</h2>
+  <div class="panel">
+  <table>
+    <tr><th>IP</th><th>Events</th></tr>
+    {% for ip, n in r.top_talkers() %}<tr><td><code>{{ ip }}</code></td><td>{{ n }}</td></tr>{% endfor %}
+  </table>
+  </div>
+
+  <footer>Generated by log-sentinel &middot; rules + Isolation Forest &middot; review findings before acting on them.</footer>
+</main>
+</body>
+</html>
