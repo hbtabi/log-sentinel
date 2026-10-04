@@ -17,3 +17,7 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# generated reports
+report.html
+report.json
