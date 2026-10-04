@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest -q
+      - name: Analyse the bundled sample logs and build the HTML report
+        run: log-sentinel --no-color analyze samples/auth.log samples/access.log --html report.html --json report.json
+      - name: Fresh simulation round-trip
+        run: |
+          log-sentinel simulate --out /tmp/sim --seed 7
+          log-sentinel --no-color analyze /tmp/sim/auth.log /tmp/sim/access.log
